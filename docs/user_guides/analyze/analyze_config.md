@@ -21,33 +21,33 @@ The `dataset_source` field determines how the dataset is loaded:
 
 ```yaml
 # Load from configuration (HuggingFace Hub or registered dataset)
-dataset_source: config
+dataset_source: CONFIG
 dataset_name: "tatsu-lab/alpaca"
 
 # OR use direct mode in Python API
-dataset_source: direct
+dataset_source: DIRECT
 # Then pass dataset to DatasetAnalyzer constructor
 ```
 
-**`config` mode:**
+**`CONFIG` mode:**
 
 - Loads dataset based on `dataset_name` or `dataset_path`
 - Supports HuggingFace Hub datasets
 - Supports locally registered Oumi datasets
 
-**`direct` mode:**
+**`DIRECT` mode:**
 
 - Dataset is passed directly to `DatasetAnalyzer.__init__()`
 - Useful when you already have a dataset loaded in memory
 
 ### Dataset Specification
 
-When `dataset_source: config`, you must provide one of:
+When `dataset_source: CONFIG`, you must provide one of:
 
 #### Option 1: Named dataset (HuggingFace or registered)
 
 ```yaml
-dataset_source: config
+dataset_source: CONFIG
 dataset_name: "databricks/dolly-15k"
 split: train
 subset: null  # Optional subset name
@@ -56,8 +56,8 @@ subset: null  # Optional subset name
 #### Option 2: Local file
 
 ```yaml
-dataset_source: config
-dataset_path: "/path/to/my_data.jsonl"
+dataset_source: CONFIG
+dataset_path: data/dataset_examples/oumi_format.jsonl
 dataset_format: oumi  # Required: "oumi" or "alpaca"
 is_multimodal: false  # Required: true or false
 ```
@@ -75,7 +75,7 @@ output_path: "./analysis_results"
 When using the CLI, you can override this with `--output`:
 
 ```bash
-oumi analyze --config config.yaml --output /custom/path
+oumi analyze --config configs/examples/analyze/basic_analyze.yaml --output /custom/path
 ```
 
 ### Analyzers Configuration
@@ -134,7 +134,7 @@ Required when using `token_count: true`:
 
 ```yaml
 tokenizer_config:
-  model_name: "meta-llama/Llama-2-7b-hf"
+  model_name: openai-community/gpt2
   tokenizer_kwargs:
     use_fast: true
   trust_remote_code: false
@@ -161,15 +161,18 @@ trust_remote_code: true
 
 ## Complete Example Configurations
 
-### Basic Text Dataset Analysis
+All examples below can be run directly from the Oumi repository root.
+
+### Basic Local Dataset Analysis
 
 ```yaml
-# Analyze a HuggingFace dataset
-dataset_source: config
-dataset_name: "tatsu-lab/alpaca"
-split: train
-sample_count: 5000
-output_path: "./alpaca_analysis"
+# configs/examples/analyze/basic_analyze.yaml
+# Run: oumi analyze --config configs/examples/analyze/basic_analyze.yaml
+dataset_source: CONFIG
+dataset_path: data/dataset_examples/oumi_format.jsonl
+dataset_format: oumi
+is_multimodal: false
+output_path: ./analysis_output/basic
 
 analyzers:
   - id: length
@@ -182,14 +185,16 @@ analyzers:
 ### Analysis with Token Counting
 
 ```yaml
-dataset_source: config
-dataset_name: "Open-Orca/OpenOrca"
-split: train
-sample_count: 10000
-output_path: "./orca_analysis"
+# configs/examples/analyze/analyze_with_tokens.yaml
+# Run: oumi analyze --config configs/examples/analyze/analyze_with_tokens.yaml
+dataset_source: CONFIG
+dataset_path: data/dataset_examples/oumi_format.jsonl
+dataset_format: oumi
+is_multimodal: false
+output_path: ./analysis_output/with_tokens
 
 tokenizer_config:
-  model_name: "mistralai/Mistral-7B-v0.1"
+  model_name: openai-community/gpt2
 
 analyzers:
   - id: length
@@ -198,47 +203,49 @@ analyzers:
       word_count: true
       sentence_count: true
       token_count: true
+      include_special_tokens: true
 ```
 
-### Local Dataset Analysis
+### Alpaca Format Dataset
 
 ```yaml
-dataset_source: config
-dataset_path: "/data/my_sft_dataset.jsonl"
-dataset_format: oumi
+# configs/examples/analyze/analyze_local_dataset.yaml
+# Run: oumi analyze --config configs/examples/analyze/analyze_local_dataset.yaml
+dataset_source: CONFIG
+dataset_path: data/dataset_examples/alpaca_format.jsonl
+dataset_format: alpaca
 is_multimodal: false
-split: train
-output_path: "./my_analysis"
+output_path: ./analysis_output/alpaca
 
 analyzers:
   - id: length
 ```
 
-### Multimodal Dataset Analysis
+### HuggingFace Hub Dataset
 
 ```yaml
-dataset_source: config
-dataset_path: "/data/vision_dataset.jsonl"
-dataset_format: oumi
-is_multimodal: true
-processor_name: "llava-hf/llava-1.5-7b-hf"
-trust_remote_code: true
-output_path: "./vl_analysis"
+# Create this file as hf_analyze.yaml and run: oumi analyze --config hf_analyze.yaml
+dataset_source: CONFIG
+dataset_name: databricks/dolly-15k
+split: train
+sample_count: 100
+output_path: ./analysis_output/dolly
 
 analyzers:
   - id: length
     params:
       char_count: true
       word_count: true
+      sentence_count: true
 ```
 
 ## Validation Rules
 
 The configuration is validated at initialization with these rules:
 
-1. **`dataset_source` is required** and must be `config` or `direct`
+1. **`dataset_source` is required** and must be `CONFIG` or `DIRECT`
 
-2. **When `dataset_source: config`:**
+2. **When `dataset_source: CONFIG`:**
    - Either `dataset_name` or `dataset_path` must be provided
 
 3. **When `dataset_path` is provided:**
@@ -260,12 +267,12 @@ The configuration is validated at initialization with these rules:
 ```python
 from oumi.core.configs import AnalyzeConfig, DatasetSource, SampleAnalyzerParams
 
-# Create configuration programmatically
+# Create configuration for local dataset
 config = AnalyzeConfig(
     dataset_source=DatasetSource.CONFIG,
-    dataset_name="databricks/dolly-15k",
-    split="train",
-    sample_count=1000,
+    dataset_path="data/dataset_examples/oumi_format.jsonl",
+    dataset_format="oumi",
+    is_multimodal=False,
     output_path="./results",
     analyzers=[
         SampleAnalyzerParams(
@@ -273,17 +280,14 @@ config = AnalyzeConfig(
             params={
                 "char_count": True,
                 "word_count": True,
-                "token_count": True,
+                "sentence_count": True,
             }
         )
     ],
-    tokenizer_config={
-        "model_name": "gpt2",
-    },
 )
 
 # Or load from YAML
-config = AnalyzeConfig.from_yaml("my_config.yaml")
+config = AnalyzeConfig.from_yaml("configs/examples/analyze/basic_analyze.yaml")
 
 # Validate (automatic on creation, but can be explicit)
 config.finalize_and_validate()
@@ -302,12 +306,12 @@ The `oumi analyze` command accepts these options:
 | `--log-level` | `-log` | Set log level: DEBUG, INFO, WARNING, ERROR |
 
 ```bash
-# Basic usage
-oumi analyze -c config.yaml
+# Basic usage with included example config
+oumi analyze -c configs/examples/analyze/basic_analyze.yaml
 
 # With all options
 oumi analyze \
-  --config config.yaml \
+  --config configs/examples/analyze/basic_analyze.yaml \
   --output ./my_results \
   --format parquet \
   --verbose \

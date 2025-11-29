@@ -29,32 +29,38 @@ Key features include:
 
 ### Using the CLI
 
-The simplest way to analyze a dataset is with a YAML configuration file:
+Analyze the included example dataset:
 
 ```bash
-oumi analyze --config configs/analyze/my_dataset.yaml
+oumi analyze --config configs/examples/analyze/basic_analyze.yaml
 ```
 
-Export results to a specific format and directory:
+This analyzes `data/dataset_examples/oumi_format.jsonl` and outputs results to `./analysis_output/basic/`.
+
+To include token counts (requires downloading a tokenizer):
 
 ```bash
-oumi analyze --config configs/analyze/my_dataset.yaml --output ./results --format parquet
+oumi analyze --config configs/examples/analyze/analyze_with_tokens.yaml
+```
+
+Export results to a different format:
+
+```bash
+oumi analyze --config configs/examples/analyze/basic_analyze.yaml --output ./my_results --format parquet
 ```
 
 ### Using the Python API
-
-For programmatic access:
 
 ```python
 from oumi.core.analyze.dataset_analyzer import DatasetAnalyzer
 from oumi.core.configs import AnalyzeConfig, DatasetSource, SampleAnalyzerParams
 
-# Configure the analysis
+# Analyze the included example dataset
 config = AnalyzeConfig(
     dataset_source=DatasetSource.CONFIG,
-    dataset_name="tatsu-lab/alpaca",  # Any HuggingFace dataset
-    split="train",
-    sample_count=1000,  # Analyze first 1000 samples
+    dataset_path="data/dataset_examples/oumi_format.jsonl",
+    dataset_format="oumi",
+    is_multimodal=False,
     analyzers=[
         SampleAnalyzerParams(
             id="length",
@@ -80,12 +86,13 @@ df = analyzer.message_df  # Pandas DataFrame with results
 
 ### Minimal Configuration
 
-A minimal analysis configuration requires:
+A minimal analysis configuration for a local file:
 
 ```yaml
-dataset_source: config
-dataset_name: "your-hf-username/your-dataset"
-split: train
+dataset_source: CONFIG
+dataset_path: data/dataset_examples/oumi_format.jsonl
+dataset_format: oumi
+is_multimodal: false
 analyzers:
   - id: length
 ```
@@ -93,20 +100,18 @@ analyzers:
 ### Full Configuration Options
 
 ```yaml
-# Required: How to load the dataset
-dataset_source: config  # "config" to load from settings, "direct" for Python API
+# Required: How to load the dataset (CONFIG or DIRECT)
+dataset_source: CONFIG
 
-# Dataset specification (one of these required when dataset_source=config)
-dataset_name: "tatsu-lab/alpaca"  # HuggingFace Hub or registered Oumi dataset
-# OR
-dataset_path: "/path/to/local/data.jsonl"  # Local file path
+# Dataset specification - local file
+dataset_path: data/dataset_examples/oumi_format.jsonl
 dataset_format: oumi  # Required with dataset_path: "oumi" or "alpaca"
 is_multimodal: false  # Required with dataset_path
 
-# Optional dataset settings
-split: train  # Dataset split (default: "train")
-subset: null  # Dataset subset/config name
-sample_count: 1000  # Limit samples to analyze (null = all)
+# OR - HuggingFace dataset (instead of dataset_path)
+# dataset_name: "tatsu-lab/alpaca"
+# split: train
+# sample_count: 1000  # Limit samples to analyze (null = all)
 
 # Output settings
 output_path: "./analysis_results"  # Where to save results
@@ -122,13 +127,7 @@ analyzers:
 
 # Optional: Tokenizer for token counting
 tokenizer_config:
-  model_name: "gpt2"
-  trust_remote_code: false
-
-# For multimodal datasets
-processor_name: null
-processor_kwargs: {}
-trust_remote_code: false
+  model_name: openai-community/gpt2
 ```
 
 For detailed configuration options, see {doc}`analyze_config`.
@@ -163,8 +162,7 @@ analyzers:
 
 ```yaml
 tokenizer_config:
-  model_name: "meta-llama/Llama-2-7b-hf"
-  trust_remote_code: false
+  model_name: openai-community/gpt2
 
 analyzers:
   - id: length
@@ -179,7 +177,20 @@ analyzers:
 After running analysis, access the summary statistics:
 
 ```python
+from oumi.core.analyze.dataset_analyzer import DatasetAnalyzer
+from oumi.core.configs import AnalyzeConfig, DatasetSource, SampleAnalyzerParams
+
+config = AnalyzeConfig(
+    dataset_source=DatasetSource.CONFIG,
+    dataset_path="data/dataset_examples/oumi_format.jsonl",
+    dataset_format="oumi",
+    is_multimodal=False,
+    analyzers=[SampleAnalyzerParams(id="length")],
+)
+
+analyzer = DatasetAnalyzer(config)
 analyzer.analyze_dataset()
+
 summary = analyzer.analysis_summary
 
 # Dataset overview
@@ -213,10 +224,10 @@ Filter results using pandas query syntax:
 
 ```python
 # Find long messages
-long_messages = analyzer.query("text_content_length_word_count > 500")
+long_messages = analyzer.query("text_content_length_word_count > 10")
 
 # Find short conversations
-short_convos = analyzer.query_conversations("text_content_length_token_count < 100")
+short_convos = analyzer.query_conversations("text_content_length_char_count < 100")
 ```
 
 ### Filtering Datasets
@@ -248,42 +259,58 @@ The analyze feature works with multiple dataset formats:
 | **Pretraining** | Raw text | C4, The Pile, etc. |
 | **HuggingFace Hub** | Any HF dataset | Loaded directly via `datasets` library |
 
+### Analyzing Local Files
+
+Analyze the included example datasets:
+
+**Oumi format (multi-turn conversations):**
+
+```bash
+oumi analyze --config configs/examples/analyze/basic_analyze.yaml
+```
+
+**Alpaca format (instruction/input/output):**
+
+```bash
+oumi analyze --config configs/examples/analyze/analyze_local_dataset.yaml
+```
+
 ### Analyzing HuggingFace Datasets
 
-You can analyze any HuggingFace Hub dataset directly:
+You can analyze any HuggingFace Hub dataset directly. Create a config file `hf_analyze.yaml`:
 
 ```yaml
-dataset_source: config
-dataset_name: "databricks/dolly-15k"
+dataset_source: CONFIG
+dataset_name: databricks/dolly-15k
 split: train
-sample_count: 5000
+sample_count: 100
+output_path: ./analysis_output/dolly
 analyzers:
   - id: length
 ```
 
+Then run:
+
+```bash
+oumi analyze --config hf_analyze.yaml
+```
+
+Or use the Python API:
+
 ```python
-# Python API
+from oumi.core.analyze.dataset_analyzer import DatasetAnalyzer
+from oumi.core.configs import AnalyzeConfig, DatasetSource, SampleAnalyzerParams
+
 config = AnalyzeConfig(
     dataset_source=DatasetSource.CONFIG,
-    dataset_name="OpenAssistant/oasst1",
+    dataset_name="databricks/dolly-15k",
     split="train",
+    sample_count=100,
     analyzers=[SampleAnalyzerParams(id="length")],
 )
 analyzer = DatasetAnalyzer(config)
 analyzer.analyze_dataset()
-```
-
-### Analyzing Local Files
-
-For local JSONL files:
-
-```yaml
-dataset_source: config
-dataset_path: "/path/to/my_data.jsonl"
-dataset_format: oumi  # or "alpaca"
-is_multimodal: false
-analyzers:
-  - id: length
+print(analyzer.analysis_summary)
 ```
 
 ## Exporting Results
@@ -294,13 +321,16 @@ The CLI automatically exports results when `output_path` is set:
 
 ```bash
 # Export to CSV (default)
-oumi analyze --config config.yaml --output ./results
+oumi analyze --config configs/examples/analyze/basic_analyze.yaml
 
 # Export to Parquet
-oumi analyze --config config.yaml --output ./results --format parquet
+oumi analyze --config configs/examples/analyze/basic_analyze.yaml --format parquet
 
 # Export to JSON
-oumi analyze --config config.yaml --output ./results --format json
+oumi analyze --config configs/examples/analyze/basic_analyze.yaml --format json
+
+# Override output directory
+oumi analyze --config configs/examples/analyze/basic_analyze.yaml --output ./my_results
 ```
 
 **Output files:**
@@ -327,31 +357,54 @@ with open("summary.json", "w") as f:
 
 ## Example Workflows
 
-### Pre-training Data Quality Check
-
-```yaml
-dataset_source: config
-dataset_name: "my-pretraining-data"
-split: train
-sample_count: 10000
-output_path: "./pretraining_analysis"
-
-tokenizer_config:
-  model_name: "gpt2"
-
-analyzers:
-  - id: length
-    params:
-      char_count: true
-      word_count: true
-      token_count: true
-```
+### Analyze with Token Counting
 
 ```bash
-oumi analyze --config pretraining_analysis.yaml
+oumi analyze --config configs/examples/analyze/analyze_with_tokens.yaml
 ```
 
-### Filtering Short Samples
+This uses GPT-2 tokenizer to count tokens in addition to characters, words, and sentences.
+
+### Custom Analysis Script
+
+```python
+from oumi.core.analyze.dataset_analyzer import DatasetAnalyzer
+from oumi.core.configs import AnalyzeConfig, DatasetSource, SampleAnalyzerParams
+
+# Analyze local dataset with token counting
+config = AnalyzeConfig(
+    dataset_source=DatasetSource.CONFIG,
+    dataset_path="data/dataset_examples/oumi_format.jsonl",
+    dataset_format="oumi",
+    is_multimodal=False,
+    output_path="./my_analysis",
+    tokenizer_config={"model_name": "openai-community/gpt2"},
+    analyzers=[
+        SampleAnalyzerParams(
+            id="length",
+            params={
+                "char_count": True,
+                "word_count": True,
+                "sentence_count": True,
+                "token_count": True,
+            }
+        )
+    ],
+)
+
+analyzer = DatasetAnalyzer(config)
+analyzer.analyze_dataset()
+
+# Print summary
+summary = analyzer.analysis_summary
+print(f"Analyzed {summary['dataset_overview']['conversations_analyzed']} conversations")
+print(f"Total messages: {summary['dataset_overview']['total_messages']}")
+
+# Export to CSV
+analyzer.message_df.to_csv("my_analysis/messages.csv", index=False)
+```
+
+### Filter Dataset by Length
 
 ```python
 from oumi.core.analyze.dataset_analyzer import DatasetAnalyzer
@@ -359,39 +412,18 @@ from oumi.core.configs import AnalyzeConfig, DatasetSource, SampleAnalyzerParams
 
 config = AnalyzeConfig(
     dataset_source=DatasetSource.CONFIG,
-    dataset_name="my-sft-dataset",
-    split="train",
+    dataset_path="data/dataset_examples/oumi_format.jsonl",
+    dataset_format="oumi",
+    is_multimodal=False,
     analyzers=[SampleAnalyzerParams(id="length")],
 )
 
 analyzer = DatasetAnalyzer(config)
 analyzer.analyze_dataset()
 
-# Filter out very short responses (< 50 words)
-quality_dataset = analyzer.filter("text_content_length_word_count >= 50")
+# Filter out very short responses (< 50 characters)
+quality_dataset = analyzer.filter("text_content_length_char_count >= 50")
 print(f"Kept {len(quality_dataset)} of {len(analyzer.dataset)} samples")
-```
-
-### Comparing Dataset Distributions
-
-```python
-# Analyze two datasets
-configs = [
-    ("dataset_a", AnalyzeConfig(...)),
-    ("dataset_b", AnalyzeConfig(...)),
-]
-
-summaries = {}
-for name, config in configs:
-    analyzer = DatasetAnalyzer(config)
-    analyzer.analyze_dataset()
-    summaries[name] = analyzer.analysis_summary
-
-# Compare statistics
-for name, summary in summaries.items():
-    msg_stats = summary["message_level_summary"]["length"]
-    token_stats = msg_stats.get("text_content_length_token_count", {})
-    print(f"{name}: mean tokens = {token_stats.get('mean', 'N/A')}")
 ```
 
 ## Troubleshooting
@@ -408,7 +440,7 @@ To compute token counts, you must provide a `tokenizer_config`:
 
 ```yaml
 tokenizer_config:
-  model_name: "gpt2"  # or your model
+  model_name: openai-community/gpt2
 
 analyzers:
   - id: length
