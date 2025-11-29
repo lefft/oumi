@@ -22,7 +22,7 @@ from oumi.core.analyze.dataframe_analyzer import DataFrameAnalyzer, DataFrameWit
 from oumi.core.configs import AnalyzeConfig, DatasetSource
 from oumi.core.datasets import BaseMapDataset
 from oumi.core.datasets.base_iterable_dataset import BaseIterableDataset
-from oumi.core.registry import REGISTRY
+from oumi.core.registry import REGISTRY, RegistryType
 from oumi.utils.analysis_utils import (
     build_tokenizer_from_config,
     compute_statistics,
@@ -185,6 +185,9 @@ class DatasetAnalyzer:
 
         Returns:
             Dictionary mapping column names to their configuration.
+
+        Raises:
+            ValueError: If dataset type cannot be determined and no schema is found.
         """
         # Detect dataset type based on the dataset class
         dataset_type = self._detect_dataset_type()
@@ -192,11 +195,16 @@ class DatasetAnalyzer:
         try:
             return get_schema_for_format(dataset_type)
         except ValueError:
-            # Fallback to conversation schema for unknown types
-            logger.warning(
-                f"Unknown dataset type '{dataset_type}', using conversation schema"
+            # Fail fast with actionable error instead of silently using a default
+            available_formats = ["oumi", "alpaca", "dpo", "kto", "pretraining"]
+            logger.error(
+                f"Unknown dataset type '{dataset_type}'. Cannot determine schema."
             )
-            return get_schema_for_format("oumi")
+            raise ValueError(
+                f"Unknown dataset type '{dataset_type}'. "
+                f"Please specify dataset_format in your configuration. "
+                f"Supported formats: {', '.join(available_formats)}"
+            )
 
     def _detect_dataset_type(self) -> str:
         """Detect the dataset type based on the dataset class and configuration.
@@ -252,15 +260,25 @@ class DatasetAnalyzer:
 
         Returns:
             Dictionary mapping analyzer IDs to analyzer instances
+
+        Raises:
+            RuntimeError: If any analyzer fails to initialize. All failures are
+                collected and reported together to help users fix all issues at once.
         """
         sample_analyzers = {}
+        failed_analyzers: list[tuple[str, str]] = []
+
         for analyzer_params in self.config.analyzers:
             try:
                 # Get the analyzer class from the registry
                 analyzer_class = REGISTRY.get_sample_analyzer(analyzer_params.id)
                 if analyzer_class is None:
+                    available_analyzers = REGISTRY.get_all(
+                        RegistryType.SAMPLE_ANALYZER
+                    ).keys()
                     raise ValueError(
-                        f"Sample analyzer '{analyzer_params.id}' not found in registry"
+                        f"Sample analyzer '{analyzer_params.id}' not found in "
+                        f"registry. Available analyzers: {available_analyzers}"
                     )
 
                 # Prepare parameters for analyzer constructor
@@ -278,6 +296,19 @@ class DatasetAnalyzer:
                     f"Failed to initialize sample analyzer {analyzer_params.id}: {e}"
                 )
                 logger.error(f"Analyzer configuration: {analyzer_params}")
+                failed_analyzers.append((analyzer_params.id, str(e)))
+
+        # Fail fast if any analyzer failed to initialize
+        if failed_analyzers:
+            error_details = "\n".join(
+                f"  - {name}: {error}" for name, error in failed_analyzers
+            )
+            raise RuntimeError(
+                f"Failed to initialize {len(failed_analyzers)} analyzer(s):\n"
+                f"{error_details}\n\n"
+                f"Cannot proceed with analysis. Please check your configuration."
+            )
+
         return sample_analyzers
 
     def analyze_dataset(self) -> None:
@@ -596,18 +627,27 @@ class DatasetAnalyzer:
 
         Returns:
             A new dataset object with the same format as the original
-        """
-        # Deep copy the original dataset to preserve all attributes and methods
-        filtered_dataset = copy.deepcopy(self.dataset)
 
+        Raises:
+            NotImplementedError: If the dataset is an iterable/streaming dataset,
+                which does not support filtering by index.
+        """
         # Filter the DataFrame to only include the specified conversations
         # Note: This only works for map datasets, not iterable datasets
         from oumi.core.datasets.base_iterable_dataset import BaseIterableDataset
 
         if isinstance(self.dataset, BaseIterableDataset):
             # For iterable datasets, we can't filter by index
-            # Return the original dataset as filtering is not supported
-            return filtered_dataset
+            # Raise an error instead of silently returning unfiltered data
+            raise NotImplementedError(
+                "Filtering is not supported for iterable/streaming datasets. "
+                "Only map-style datasets can be filtered by index. "
+                "Consider converting your dataset to a map-style dataset first, "
+                "or use the query() method to get filtered analysis results only."
+            )
+
+        # Deep copy the original dataset to preserve all attributes and methods
+        filtered_dataset = copy.deepcopy(self.dataset)
 
         original_df = self.dataset.data
         filtered_dataset._data = original_df.iloc[conversation_indices].copy()
